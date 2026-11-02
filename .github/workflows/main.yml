@@ -1,0 +1,30 @@
+name: Build Installer
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Add MSVC to PATH
+      uses: ilammy/msvc-dev-cmd@v1
+
+    - name: Compile Resource Script
+      run: rc installer.rc
+
+    - name: Compile Installer
+      run: |
+        cl /EHsc /std:c++17 /O2 installer.cpp /link /SUBSYSTEM:WINDOWS installer.res user32.lib gdi32.lib shell32.lib ole32.lib oleaut32.lib wininet.lib comctl32.lib gdiplus.lib advapi32.lib
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: OnyxShadeInstaller
+        path: installer.exe
