@@ -33,7 +33,7 @@ using namespace Gdiplus;
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------- constants
-static const wchar_t* APP_NAME  = L"OnyxShade v1.0.5";
+static const wchar_t* APP_NAME  = L"OnyxShade v1.0.4.0";
 static const wchar_t* ZIP_URL   = L"https://github.com/onyxshades/onyxshadeinstallers/releases/download/v0.0.1/shade.zip";
 
 static const int WIN_W = 670, WIN_H = 380, LEFT_W = 280;
