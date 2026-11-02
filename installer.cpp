@@ -288,37 +288,37 @@ static void SleepCancellable(int ms) {
     for (int t = 0; t < ms && !g_Cancelled; t += 100) Sleep(100);
 }
 
-// Replace the old install with the freshly extracted one.
-// The old copy is kept as ".bak" until the swap succeeds, so a failure never leaves the user with nothing.
-static bool SwapInstall(const fs::path& staging, const fs::path& dest, std::wstring& error) {
+// Рекурсивное слияние: добавляет и обновляет файлы из архива, не удаляя сторонние файлы в целевой папке
+static bool MergeInstall(const fs::path& staging, const fs::path& dest, std::wstring& error) {
     std::error_code ec;
-    fs::path backup = dest;
-    backup += L".bak";
-    fs::remove_all(backup, ec);
-
-    bool hadOld = fs::exists(dest, ec);
-    if (hadOld) {
-        fs::rename(dest, backup, ec);
-        if (ec) {
-            error = L"Cannot replace the existing shaders. Close any program that uses them and try again.";
-            return false;
-        }
-    }
-
-    fs::rename(staging, dest, ec);
+    fs::create_directories(dest, ec);
     if (ec) {
-        if (hadOld) { std::error_code ec2; fs::rename(backup, dest, ec2); } // roll back
-        error = L"Failed to finalize the installation.";
+        error = L"Failed to create target directory.";
         return false;
     }
 
-    if (hadOld) fs::remove_all(backup, ec);
+    for (auto it = fs::recursive_directory_iterator(staging, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+        const auto& srcPath = it->path();
+        auto relPath = fs::relative(srcPath, staging);
+        auto targetPath = dest / relPath;
+
+        if (it->is_directory(ec)) {
+            fs::create_directories(targetPath, ec);
+        } else if (it->is_regular_file(ec)) {
+            fs::create_directories(targetPath.parent_path(), ec);
+            fs::copy_file(srcPath, targetPath, fs::copy_options::overwrite_existing, ec);
+            if (ec) {
+                error = L"Failed to write file (it may be in use): " + targetPath.filename().wstring();
+                return false;
+            }
+        }
+    }
     return true;
 }
 
 static void InstallationThread(HWND hWnd) {
     auto progress  = [hWnd](float p, const std::wstring& s) { Post(hWnd, WM_APP_PROGRESS, (WPARAM)(p * 100), &s); };
-    auto fail      = [hWnd](const std::wstring& s)          { Post(hWnd, WM_APP_ERROR, 0, &s); };
+    auto fail      = [hWnd](const std::wstring& s)         { Post(hWnd, WM_APP_ERROR, 0, &s); };
     auto cancelled = [hWnd]()                               { Post(hWnd, WM_APP_CANCELLED, 0, nullptr); };
 
     fs::path tempZip = fs::temp_directory_path() / L"onyxshade_shade.zip";
@@ -352,7 +352,7 @@ static void InstallationThread(HWND hWnd) {
         progress(0.78f, L"Verifying archive...");
         if (!IsValidZip(tempZip)) { cleanup(); fail(L"The downloaded file is not a valid ZIP archive."); return; }
 
-        // extract into a staging folder first, so a broken download never damages the current install
+        // extract into a staging folder first
         progress(0.80f, L"Extracting shaders...");
         fs::remove_all(staging, ec);
         fs::create_directories(staging);
@@ -362,8 +362,7 @@ static void InstallationThread(HWND hWnd) {
         if (g_Cancelled) { cleanup(); cancelled(); return; }
         if (!ok || fs::is_empty(staging, ec)) { cleanup(); fail(L"Failed to extract files."); return; }
 
-        // If the archive wraps everything in a single top-level folder, install that folder's CONTENTS
-        // directly into the target directory (no extra "shade" folder).
+        // If the archive wraps everything in a single top-level folder, use that folder's contents
         fs::path root = staging;
         {
             std::vector<fs::path> entries;
@@ -376,7 +375,7 @@ static void InstallationThread(HWND hWnd) {
         }
 
         progress(0.95f, L"Installing...");
-        if (!SwapInstall(root, g_DestPath, error)) { cleanup(); fail(error); return; }
+        if (!MergeInstall(root, g_DestPath, error)) { cleanup(); fail(error); return; }
         fs::remove_all(staging, ec); // leftover (now empty) staging folder
 
         progress(1.0f, L"Installation completed successfully!");
@@ -481,7 +480,7 @@ static void PaintWindow(HWND hWnd) {
 // ---------------------------------------------------------------- UI helpers
 static HFONT MakeFont(int h, int weight) {
     return CreateFontW(h, 0, 0, 0, weight, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_OUTLINE_PRECIS,
-                       CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+                        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Segoe UI");
 }
 
 static HWND MakeLabel(HWND parent, const wchar_t* text, int x, int y, int w, int h, HFONT font) {
@@ -693,7 +692,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
         DispatchMessageW(&msg);
     }
 
-    GdiplusShutdown(g_GdiplusToken);
+    GdiplusStartup(g_GdiplusToken);
     if (mutex) CloseHandle(mutex);
     return (int)msg.wParam;
 }
